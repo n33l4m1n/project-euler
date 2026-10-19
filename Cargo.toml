@@ -1,0 +1,11 @@
+[package]
+name = "project-euler"
+version = "0.1.0"
+edition = "2024"
+description = "Project Euler solutions, problems 1–100, each checked by tests"
+publish = false
+
+[dependencies]
+
+[profile.release]
+debug = false

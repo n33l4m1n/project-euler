@@ -1,28 +1,20 @@
-# Project-Euler
-https://projecteuler.net/
+# Project Euler
 
-Leonhard Euler (1707-1783)
+Solutions to [Project Euler](https://projecteuler.net/) problems in Rust, from the N33L4M1N lab notebook.
 
-About Project Euler
+Each problem lives in `src/pNNN.rs` with a short note on the approach and two tests: the worked example from the
+problem statement, and the verified answer. Shared number theory (gcd, lcm, sieve) is in `src/math.rs`.
 
-What is Project Euler?
+```sh
+cargo test                      # check every answer
+cargo run --release             # solve everything, with timings
+cargo run --release -- 7 10     # solve specific problems
+```
 
-Project Euler is a series of challenging mathematical/computer programming problems that will require more than just mathematical insights to solve. Although mathematics will help you arrive at elegant and efficient methods, the use of a computer and programming skills will be required to solve most problems.
+Problems 1 and 2 were first solved in C in 2017. Those originals are kept in [`c/`](c/).
 
-The motivation for starting Project Euler, and its continuation, is to provide a platform for the inquiring mind to delve into unfamiliar areas and learn new concepts in a fun and recreational context.
+Project Euler asks that solutions beyond the first 100 problems stay private, so this repository stops at
+problem 100.
 
-Who are the problems aimed at?
-
-The intended audience include students for whom the basic curriculum is not feeding their hunger to learn, adults whose background was not primarily mathematics but had an interest in things mathematical, and professionals who want to keep their problem solving and mathematics on the cutting edge.
-
-Can anyone solve the problems?
-
-The problems range in difficulty and for many the experience is inductive chain learning. That is, by solving one problem it will expose you to a new concept that allows you to undertake a previously inaccessible problem. So the determined participant will slowly but surely work his/her way through every problem.
-
-What next?
-
-In order to track your progress it is necessary to setup an account and have Cookies enabled. If you already have an account then Login, otherwise please Register – it's completely free!
-
-However, as the problems are challenging then you may wish to view the Problems before registering.
-
-"Project Euler exists to encourage, challenge, and develop the skills and enjoyment of anyone with an interest in the fascinating world of mathematics."
+Problem statements are paraphrased from projecteuler.net, licensed
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
