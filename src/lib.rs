@@ -22,10 +22,11 @@ pub mod p017;
 pub mod p018;
 pub mod p019;
 pub mod p020;
+pub mod p021;
 
 /// Problems with a solution in this crate, in order.
 pub const SOLVED: &[u32] = &[
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
 ];
 
 /// Solves `problem`, or returns `None` if it isn't solved yet.
@@ -51,6 +52,7 @@ pub fn solve(problem: u32) -> Option<u64> {
         18 => p018::solve(),
         19 => p019::solve(),
         20 => p020::solve(),
+        21 => p021::solve(),
         _ => return None,
     })
 }
