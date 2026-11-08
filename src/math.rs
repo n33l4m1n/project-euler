@@ -58,9 +58,41 @@ pub fn add_decimal(a: &str, b: &str) -> String {
     String::from_utf8(out).expect("ascii digits")
 }
 
+/// Multiplies a little-endian decimal digit vector (`[1]` is 1, `[0, 1]` is 10) by `m` in place.
+/// O(len); the carry stays in `u64`, so `m` may be any `u32`. Multiplying by 0 leaves `[0]`.
+pub fn mul_small(digits: &mut Vec<u8>, m: u32) {
+    let mut carry = 0u64;
+    for d in digits.iter_mut() {
+        let v = u64::from(*d) * u64::from(m) + carry;
+        *d = (v % 10) as u8;
+        carry = v / 10;
+    }
+    while carry > 0 {
+        digits.push((carry % 10) as u8);
+        carry /= 10;
+    }
+    while digits.len() > 1 && digits.last() == Some(&0) {
+        digits.pop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn small_multiplication() {
+        let mut d = vec![5, 2]; // 25
+        mul_small(&mut d, 4);
+        assert_eq!(d, [0, 0, 1]); // 100
+        mul_small(&mut d, 123);
+        assert_eq!(d, [0, 0, 3, 2, 1]); // 12300
+        mul_small(&mut d, 0);
+        assert_eq!(d, [0]);
+        let mut d = vec![1];
+        mul_small(&mut d, u32::MAX);
+        assert_eq!(d, [5, 9, 2, 7, 6, 9, 4, 9, 2, 4]); // 4294967295
+    }
 
     #[test]
     fn decimal_addition() {
