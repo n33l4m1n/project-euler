@@ -1,0 +1,106 @@
+# Agent loop, dispatcher. Starts the oldest `ready` issue on its agent's implement workflow, inside the brakes:
+# kill switch AGENTS_ENABLED, WIP cap AGENT_WIP (open `in-progress` issues), daily run cap AGENT_DAILY_RUNS and a
+# separate Codex cap AGENT_DAILY_CODEX (OpenAI API spend). Runs on `ready`, on a schedule, when an agent PR closes
+# (frees WIP; an unmerged close releases its issue to a human), and by hand.
+name: dispatch
+
+on:
+  issues:
+    types: [labeled]
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      vars.AGENTS_ENABLED == 'true' &&
+      (github.event_name != 'issues' || github.event.label.name == 'ready')
+    runs-on: ubuntu-24.04
+    environment: agent
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AGENT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: read
+
+      - name: Release the issue of an agent PR closed without merging
+        if: >-
+          github.event_name == 'pull_request_target' &&
+          !github.event.pull_request.merged &&
+          startsWith(github.event.pull_request.head.ref, 'agent/') &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          issue=$(printf '%s\n' "$BODY" | grep -oE 'Closes #[0-9]+' | head -1 | tr -dc 0-9)
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --remove-label in-progress --add-label needs-human
+            gh issue comment "$issue" --body "#$PR was closed without merging: a human decides what's next."
+          fi
+          gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
+
+      - name: Pick and start the next task
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          RUN_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WIP: ${{ vars.AGENT_WIP || '2' }}
+          DAILY: ${{ vars.AGENT_DAILY_RUNS || '8' }}
+          DAILY_CODEX: ${{ vars.AGENT_DAILY_CODEX || '2' }}
+        run: |
+          set -euo pipefail
+          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          runs() { GH_TOKEN=$RUN_TOKEN gh run list --workflow "$1" --created ">=$since" --limit 200 --json databaseId --jq length; }
+          app() { GH_TOKEN=$APP_TOKEN gh "$@"; }
+
+          active=$(app issue list --label in-progress --state open --json number --jq length)
+          [ "$active" -lt "$WIP" ] || { echo "WIP $active/$WIP: waiting"; exit 0; }
+          claude_runs=$(runs implement-claude.yml)
+          codex_runs=$(runs implement-codex.yml)
+          total=$((claude_runs + codex_runs))
+          [ "$total" -lt "$DAILY" ] || { echo "daily cap reached: $total/$DAILY"; exit 0; }
+
+          app issue list --label ready --state open --limit 50 --json number,labels,createdAt \
+            --jq 'sort_by(.createdAt) | .[] | [(.number | tostring), ([.labels[].name] | join(","))] | @tsv' \
+            > "$RUNNER_TEMP/ready.tsv"
+          while IFS=$'\t' read -r n labels; do
+            case ",$labels," in *,in-progress,*|*,needs-human,*|*,blocked,*) continue ;; esac
+            case ",$labels," in
+              *,agent:codex,*)
+                agent=codex
+                if [ "$codex_runs" -ge "$DAILY_CODEX" ]; then echo "#$n waits: Codex cap $codex_runs/$DAILY_CODEX"; continue; fi ;;
+              *,agent:claude,*) agent=claude ;;
+              *)
+                app issue edit "$n" --add-label needs-human --remove-label ready
+                app issue comment "$n" --body "Marked ready without an agent:claude or agent:codex label: a human decides."
+                continue ;;
+            esac
+            app issue edit "$n" --add-label in-progress --remove-label ready
+            GH_TOKEN=$RUN_TOKEN gh workflow run "implement-$agent.yml" --ref main -f issue="$n"
+            app issue comment "$n" --body "Dispatched to **$agent** (WIP $((active + 1))/$WIP; implement runs in 24 h: $((total + 1))/$DAILY)."
+            exit 0
+          done < "$RUNNER_TEMP/ready.tsv"
+          echo "nothing to dispatch"

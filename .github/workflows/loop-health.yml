@@ -1,0 +1,68 @@
+# Agent loop, algedonic channel: a daily digest in the pinned "Loop health" issue (label loop-health). The body
+# holds the latest digest; each run also adds it as a comment, so GitHub emails the owner. No mail credentials in CI.
+name: loop-health
+
+on:
+  schedule:
+    - cron: "5 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ENABLED: ${{ vars.AGENTS_ENABLED }}
+          WIP: ${{ vars.AGENT_WIP || '2' }}
+          DAILY: ${{ vars.AGENT_DAILY_RUNS || '8' }}
+          DAILY_CODEX: ${{ vars.AGENT_DAILY_CODEX || '2' }}
+        run: |
+          set -euo pipefail
+          SINCE=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          export SINCE
+          num=$(gh issue list --label loop-health --state open --json number --jq '.[0].number // empty')
+          if [ -z "$num" ]; then
+            num=$(gh issue create --title "Loop health" --label loop-health --body "Created by loop-health.yml." | grep -oE '[0-9]+$')
+          fi
+          count() { gh issue list --label "$1" --state open --limit 200 --json number --jq length; }
+          {
+            echo "## Loop health, $(date -u +'%F %H:%M') UTC"
+            echo
+            echo "AGENTS_ENABLED=\`$ENABLED\` · WIP cap $WIP · implement runs/day $DAILY (Codex $DAILY_CODEX)"
+            echo
+            echo "| Issues | Open |"
+            echo "|---|---|"
+            for l in ready in-progress needs-human blocked; do echo "| \`$l\` | $(count "$l") |"; done
+            echo
+            echo "### Open agent PRs"
+            gh pr list --state open --author "app/n33l4m1n-agent" --json number,title,labels,createdAt \
+              --jq '.[] | "- #\(.number) \(.title) · \([.labels[].name] | join(", ")) · opened \(.createdAt[:10])"'
+            echo
+            echo "### Runs in the last 24 h"
+            echo "| Workflow | Runs | Failed |"
+            echo "|---|---|---|"
+            for wf in triage dispatch implement-claude implement-codex review-codex review-claude gates; do
+              WF=$wf gh run list --workflow "$wf.yml" --created ">=$SINCE" --limit 200 --json conclusion \
+                --jq '"| \(env.WF) | \(length) | \(map(select(.conclusion == "failure")) | length) |"' 2>/dev/null \
+                || echo "| $wf | ? | ? |"
+            done
+            echo
+            echo "### Needs a human"
+            gh issue list --label needs-human --state open --json number,title --jq '.[] | "- #\(.number) \(.title)"'
+            gh pr list --label needs-human --state open --json number,title --jq '.[] | "- PR #\(.number) \(.title)"'
+            echo
+            echo "### In progress for more than 24 h"
+            gh issue list --label in-progress --state open --json number,title,updatedAt \
+              --jq '.[] | select(.updatedAt < env.SINCE) | "- #\(.number) \(.title) (last update \(.updatedAt[:16]))"'
+          } > "$RUNNER_TEMP/digest.md"
+          gh issue edit "$num" --body-file "$RUNNER_TEMP/digest.md"
+          gh issue comment "$num" --body-file "$RUNNER_TEMP/digest.md"

@@ -1,0 +1,59 @@
+name: agent-task
+description: >-
+  Prepare an agent run: write the task file (the issue, plus the latest review for a fix round) and switch to the
+  agent branch. New task: agent/<implementer>-issue-<N> from main. Fix round: the PR's existing branch.
+inputs:
+  issue: { description: Issue number, required: true }
+  pr: { description: PR number for a review-fix round; empty for a new task, required: false, default: "" }
+  implementer: { description: claude or codex, required: true }
+  review-heading: { description: Heading of the reviewer's comments, e.g. "### Codex review", required: true }
+  token: { description: App installation token, required: true }
+outputs:
+  branch: { description: Agent branch, value: "${{ steps.prep.outputs.branch }}" }
+  mode: { description: new or fix, value: "${{ steps.prep.outputs.mode }}" }
+  task-file: { description: Path of the task file, value: "${{ steps.prep.outputs.task_file }}" }
+  title: { description: Issue title, value: "${{ steps.prep.outputs.title }}" }
+runs:
+  using: composite
+  steps:
+    - id: prep
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        ISSUE: ${{ inputs.issue }}
+        PR: ${{ inputs.pr }}
+        IMPL: ${{ inputs.implementer }}
+        HEADING: ${{ inputs.review-heading }}
+      run: |
+        set -euo pipefail
+        auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+        export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="$auth"
+        task="$RUNNER_TEMP/task.md"
+        title=$(gh issue view "$ISSUE" --json title --jq .title)
+        gh issue view "$ISSUE" --json title,body --jq '"# " + .title + "\n\n" + .body' > "$task"
+        if [ -z "$PR" ]; then
+          branch="agent/${IMPL}-issue-${ISSUE}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "::error::$branch already exists; close or merge its PR first"; exit 1
+          fi
+          git switch -c "$branch"
+          mode=new
+        else
+          branch=$(gh pr view "$PR" --json headRefName --jq .headRefName)
+          case "$branch" in "agent/${IMPL}-issue-"*) ;; *) echo "::error::PR $PR is on $branch, not an agent/${IMPL}-issue-* branch"; exit 1 ;; esac
+          git fetch origin "$branch"
+          git switch -c "$branch" "origin/$branch"
+          gh pr view "$PR" --json comments --jq \
+            '[.comments[] | select((.author.login | startswith("github-actions")) and (.body | startswith(env.HEADING)))] | last | .body // ""' \
+            > "$RUNNER_TEMP/review.md"
+          [ -s "$RUNNER_TEMP/review.md" ] || { echo "::error::no '$HEADING' comment on PR $PR"; exit 1; }
+          { echo; echo "## Review to address in this round"; echo; cat "$RUNNER_TEMP/review.md"; } >> "$task"
+          mode=fix
+        fi
+        {
+          echo "branch=$branch"
+          echo "mode=$mode"
+          echo "task_file=$task"
+          echo "title=$title"
+        } >> "$GITHUB_OUTPUT"
