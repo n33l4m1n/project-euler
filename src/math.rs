@@ -11,6 +11,27 @@ pub fn lcm(a: u64, b: u64) -> u64 {
     a / gcd(a, b) * b
 }
 
+/// Sum of the positive divisors strictly below `n`, using divisor pairs.
+/// O(sqrt(n)) time and O(1) space. Returns 0 for `n <= 1`.
+pub fn proper_divisor_sum(n: u64) -> u64 {
+    if n <= 1 {
+        return 0;
+    }
+    let mut sum = 1;
+    let mut divisor = 2;
+    while divisor <= n / divisor {
+        if n.is_multiple_of(divisor) {
+            sum += divisor;
+            let paired = n / divisor;
+            if paired != divisor {
+                sum += paired;
+            }
+        }
+        divisor += 1;
+    }
+    sum
+}
+
 /// All primes `<= limit`, by the sieve of Eratosthenes.
 pub fn primes_up_to(limit: usize) -> Vec<u64> {
     if limit < 2 {
@@ -79,6 +100,17 @@ pub fn mul_small(digits: &mut Vec<u8>, m: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proper_divisor_sums() {
+        assert_eq!(proper_divisor_sum(0), 0);
+        assert_eq!(proper_divisor_sum(1), 0);
+        assert_eq!(proper_divisor_sum(2), 1);
+        assert_eq!(proper_divisor_sum(6), 6);
+        assert_eq!(proper_divisor_sum(28), 28);
+        assert_eq!(proper_divisor_sum(12), 16);
+        assert_eq!(proper_divisor_sum(36), 55);
+    }
 
     #[test]
     fn small_multiplication() {
