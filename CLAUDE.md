@@ -1,8 +1,9 @@
 # project-euler: rules for agents
 
-- One problem per file: `src/pNNN.rs`, registered in `src/lib.rs` and `src/main.rs` like the existing ones.
+- One problem per file: `src/pNNN.rs`, registered in `src/lib.rs` (its `mod` line, `SOLVED` and the `solve` match).
+  `src/main.rs` needs no change.
 - Each file starts with a short note on the approach. Each problem has two tests: the worked example from the problem
-  statement and the verified answer.
+  statement (or a small hand-checked case when there isn't one) and the verified answer.
 - Rust from `rust-toolchain.toml`, std only: never add a dependency or a build script.
 - Problems 1–100 only (Project Euler asks that later solutions stay private).
 - Shared number theory goes in `src/math.rs`, with its own tests.
