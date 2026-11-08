@@ -1,5 +1,6 @@
-# Cross-model review (author ≠ reviewer): Codex reviews every PR the n33l4m1n-agent App opens from an
-# agent/* branch and posts its review as a comment. Read-only sandbox; it never approves or merges.
+# Cross-model review (author ≠ reviewer): Codex reviews every PR Claude opens (agent/claude-* branches).
+# Read-only sandbox; review-verdict posts it and, on CHANGES NEEDED, starts a Claude fix round (max
+# AGENT_MAX_ROUNDS). It never approves or merges.
 name: review-codex
 
 on:
@@ -12,7 +13,7 @@ permissions:
 jobs:
   review:
     if: >-
-      startsWith(github.head_ref, 'agent/') &&
+      startsWith(github.head_ref, 'agent/claude-') &&
       github.event.pull_request.user.login == 'n33l4m1n-agent[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       vars.AGENTS_ENABLED == 'true'
@@ -63,13 +64,22 @@ jobs:
     if: needs.review.outputs.review != ''
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       pull-requests: write
+      issues: write
+      actions: write
     steps:
-      - name: Post the review as a PR comment
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REVIEW: ${{ needs.review.outputs.review }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          printf '### Codex review\n\n%s\n' "$REVIEW" > review.md
-          gh pr comment "$PR" --repo "${{ github.repository }}" --body-file review.md
+      - name: Check out main (the verdict logic never comes from the PR branch)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: ./.github/actions/review-verdict
+        with:
+          review: ${{ needs.review.outputs.review }}
+          heading: "### Codex review"
+          pr: ${{ github.event.pull_request.number }}
+          implementer-workflow: implement-claude.yml
+          max-rounds: ${{ vars.AGENT_MAX_ROUNDS || '3' }}
+          token: ${{ github.token }}

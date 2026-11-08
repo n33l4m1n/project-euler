@@ -1,0 +1,48 @@
+name: review-verdict
+description: >-
+  Post a review as a PR comment and act on its verdict. CHANGES NEEDED: dispatch the implementer for a fix round, up
+  to max-rounds; past that, label needs-human. APPROVE-WORTHY: label reviewed. Never approves or merges.
+inputs:
+  review: { description: Review text (first line is the verdict), required: true }
+  heading: { description: Comment heading, e.g. "### Codex review", required: true }
+  pr: { description: PR number, required: true }
+  implementer-workflow: { description: Workflow file that fixes this PR, required: true }
+  max-rounds: { description: Fix rounds allowed, required: false, default: "3" }
+  token: { description: GITHUB_TOKEN with pull-requests, issues and actions write, required: true }
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        REVIEW: ${{ inputs.review }}
+        HEADING: ${{ inputs.heading }}
+        PR: ${{ inputs.pr }}
+        WF: ${{ inputs.implementer-workflow }}
+        MAX: ${{ inputs.max-rounds }}
+      run: |
+        set -euo pipefail
+        printf '%s\n\n%s\n' "$HEADING" "$REVIEW" > "$RUNNER_TEMP/review.md"
+        gh pr comment "$PR" --body-file "$RUNNER_TEMP/review.md"
+        verdict=$(printf '%s\n' "$REVIEW" | grep -m1 -E 'APPROVE-WORTHY|CHANGES NEEDED' || true)
+        case "$verdict" in
+          *"CHANGES NEEDED"*)
+            rounds=$(gh pr view "$PR" --json comments --jq \
+              '[.comments[] | select((.author.login | startswith("github-actions")) and (.body | startswith(env.HEADING)) and (.body | contains("CHANGES NEEDED")))] | length')
+            issue=$(gh pr view "$PR" --json body --jq .body | grep -oE 'Closes #[0-9]+' | head -1 | tr -dc 0-9)
+            if [ -n "$issue" ] && [ "$rounds" -le "$MAX" ]; then
+              gh pr edit "$PR" --add-label changes-requested --remove-label reviewed >/dev/null
+              gh workflow run "$WF" --ref main -f issue="$issue" -f pr="$PR"
+              echo "fix round $rounds of $MAX dispatched to $WF"
+            else
+              gh pr edit "$PR" --add-label needs-human --remove-label changes-requested >/dev/null
+              gh pr comment "$PR" --body "Review round limit ($MAX) reached, or no linked issue: a human decides."
+            fi
+            ;;
+          *"APPROVE-WORTHY"*)
+            gh pr edit "$PR" --add-label reviewed --remove-label changes-requested >/dev/null ;;
+          *)
+            gh pr edit "$PR" --add-label needs-human >/dev/null
+            gh pr comment "$PR" --body "The review had no verdict line: a human decides." ;;
+        esac

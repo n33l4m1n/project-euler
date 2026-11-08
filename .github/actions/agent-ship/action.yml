@@ -1,0 +1,67 @@
+name: agent-ship
+description: >-
+  After an agent has edited the working tree: refuse protected paths, run `make check`, commit as n33l4m1n-agent[bot]
+  (unsigned, decisions 2026-11-08), push the agent branch, then open the PR (new task) or report the fix (review round).
+inputs:
+  issue: { description: Issue number, required: true }
+  pr: { description: PR number for a fix round, required: false, default: "" }
+  branch: { description: Agent branch, required: true }
+  mode: { description: new or fix, required: true }
+  title: { description: Issue title, required: true }
+  implementer: { description: claude or codex, required: true }
+  reviewer: { description: The other model, required: true }
+  token: { description: App installation token, required: true }
+  deny-paths:
+    description: Extended regex of paths an agent may not change
+    required: false
+    default: '^(\.github/|Makefile$|rust-toolchain\.toml$|Cargo\.toml$)'
+outputs:
+  pr: { description: PR number, value: "${{ steps.ship.outputs.pr }}" }
+runs:
+  using: composite
+  steps:
+    - id: ship
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        ISSUE: ${{ inputs.issue }}
+        PR: ${{ inputs.pr }}
+        BRANCH: ${{ inputs.branch }}
+        MODE: ${{ inputs.mode }}
+        TITLE: ${{ inputs.title }}
+        IMPL: ${{ inputs.implementer }}
+        REVIEWER: ${{ inputs.reviewer }}
+        DENY: ${{ inputs.deny-paths }}
+      run: |
+        set -euo pipefail
+        [ "$(git branch --show-current)" = "$BRANCH" ] || { echo "::error::not on $BRANCH"; exit 1; }
+        changed=$(git status --porcelain --untracked-files=all | cut -c4-)
+        [ -n "$changed" ] || { echo "::error::the agent made no changes"; exit 1; }
+        if bad=$(printf '%s\n' "$changed" | grep -E "$DENY"); then
+          echo "::error::the agent changed protected paths:"; printf '%s\n' "$bad"; exit 1
+        fi
+        secretish='(^|/)_snapshots/|\.(env|pem|key|p12|kdbx|tgz|jks|keystore)$|\.tar\.gz$|(^|/)id_(rsa|ed25519)'
+        if bad=$(printf '%s\n' "$changed" | grep -E "$secretish"); then
+          echo "::error::secret-shaped paths:"; printf '%s\n' "$bad"; exit 1
+        fi
+        make check
+        git add -A
+        git -c user.name="n33l4m1n-agent[bot]" \
+            -c user.email="349171298+n33l4m1n-agent[bot]@users.noreply.github.com" \
+            -c commit.gpgsign=false \
+            commit -q -m "$( [ "$MODE" = fix ] && echo "Issue #$ISSUE: address review" || echo "Issue #$ISSUE: $TITLE")"
+        auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+        GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader GIT_CONFIG_VALUE_0="$auth" \
+          git push -q origin "HEAD:refs/heads/$BRANCH"
+        if [ "$MODE" = new ]; then
+          body=$(printf 'Closes #%s.\n\nImplemented-by: %s\nReviewed-by: %s (automatic)\n\nThe owner merges.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)' "$ISSUE" "$IMPL" "$REVIEWER")
+          url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$body")
+          pr=${url##*/}
+          gh issue comment "$ISSUE" --body "$IMPL opened #$pr; $REVIEWER reviews it automatically."
+        else
+          pr=$PR
+          gh pr edit "$pr" --remove-label changes-requested >/dev/null 2>&1 || true
+          gh pr comment "$pr" --body "$IMPL pushed fixes for the latest review ($(git rev-parse --short HEAD)); $REVIEWER reviews again."
+        fi
+        echo "pr=$pr" >> "$GITHUB_OUTPUT"
