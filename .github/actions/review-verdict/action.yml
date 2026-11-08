@@ -1,13 +1,14 @@
 name: review-verdict
 description: >-
   Post a review as a PR comment and act on its verdict. CHANGES NEEDED: dispatch the implementer for a fix round, up
-  to max-rounds; past that, label needs-human. APPROVE-WORTHY: label reviewed. Never approves or merges.
+  to max-rounds and within the implementer's daily-cap; otherwise label needs-human. APPROVE-WORTHY: label reviewed. Never approves or merges.
 inputs:
   review: { description: Review text (first line is the verdict), required: true }
   heading: { description: Comment heading, e.g. "### Codex review", required: true }
   pr: { description: PR number, required: true }
   implementer-workflow: { description: Workflow file that fixes this PR, required: true }
   max-rounds: { description: Fix rounds allowed, required: false, default: "3" }
+  daily-cap: { description: Max runs of the implementer workflow in 24 h (fix rounds count too), required: false, default: "8" }
   token: { description: GITHUB_TOKEN with pull-requests, issues and actions write, required: true }
 runs:
   using: composite
@@ -21,6 +22,7 @@ runs:
         PR: ${{ inputs.pr }}
         WF: ${{ inputs.implementer-workflow }}
         MAX: ${{ inputs.max-rounds }}
+        CAP: ${{ inputs.daily-cap }}
       run: |
         set -euo pipefail
         printf '%s\n\n%s\n' "$HEADING" "$REVIEW" > "$RUNNER_TEMP/review.md"
@@ -31,7 +33,12 @@ runs:
             rounds=$(gh pr view "$PR" --json comments --jq \
               '[.comments[] | select((.author.login | startswith("github-actions")) and (.body | startswith(env.HEADING)) and (.body | contains("CHANGES NEEDED")))] | length')
             issue=$(gh pr view "$PR" --json body --jq .body | grep -oE 'Closes #[0-9]+' | head -1 | tr -dc 0-9)
-            if [ -n "$issue" ] && [ "$rounds" -le "$MAX" ]; then
+            since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+            used=$(gh run list --workflow "$WF" --created ">=$since" --limit 200 --json databaseId --jq length)
+            if [ -n "$issue" ] && [ "$rounds" -le "$MAX" ] && [ "$used" -ge "$CAP" ]; then
+              gh pr edit "$PR" --add-label needs-human --remove-label changes-requested >/dev/null
+              gh pr comment "$PR" --body "Fix round $rounds held: $WF has used $used of its $CAP runs in 24 h. Re-run tomorrow with: gh workflow run $WF -f issue=$issue -f pr=$PR"
+            elif [ -n "$issue" ] && [ "$rounds" -le "$MAX" ]; then
               gh pr edit "$PR" --add-label changes-requested --remove-label reviewed >/dev/null
               gh workflow run "$WF" --ref main -f issue="$issue" -f pr="$PR"
               echo "fix round $rounds of $MAX dispatched to $WF"

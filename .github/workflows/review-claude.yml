@@ -94,4 +94,5 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           implementer-workflow: implement-codex.yml
           max-rounds: ${{ vars.AGENT_MAX_ROUNDS || '3' }}
+          daily-cap: ${{ vars.AGENT_DAILY_CODEX || '2' }}
           token: ${{ github.token }}

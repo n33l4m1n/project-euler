@@ -82,4 +82,5 @@ jobs:
           pr: ${{ github.event.pull_request.number }}
           implementer-workflow: implement-claude.yml
           max-rounds: ${{ vars.AGENT_MAX_ROUNDS || '3' }}
+          daily-cap: ${{ vars.AGENT_DAILY_RUNS || '8' }}
           token: ${{ github.token }}
