@@ -12,6 +12,8 @@ cargo run --release             # solve everything, with timings
 cargo run --release -- 7 10     # solve specific problems
 ```
 
+Write-up of problems 11 to 21 and how they were solved: [Euler 11 to 21](https://n33l4m1n.com/euler-agent-solutions/).
+
 Problems 1 and 2 were first solved in C in 2017. Those originals are kept in [`c/`](c/).
 
 ## How this repository is built: an agent loop with one human gate
